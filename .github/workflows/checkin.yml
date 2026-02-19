@@ -2,8 +2,8 @@ name: 每日自动签到 - audiences.me
 
 on:
   schedule:
-    # 每天 UTC 16:05 执行 = 北京时间 00:05（签到名额刚刷新）
-    - cron: '5 16 * * *'
+    # 每天 UTC 01:00 执行 = 北京时间 09:00
+    - cron: '0 1 * * *'
     # 每月 1 日和 20 日 UTC 12:00 触发保活提交（间隔不超过 50 天，GitHub 60 天无活动会暂停）
     - cron: '0 12 1,20 * *'
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # 仅每日签到的 cron 触发，或手动触发时执行
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '5 16 * * *'
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 1 * * *'
 
     steps:
       - name: 检出代码
@@ -35,6 +35,7 @@ jobs:
           SITE_USERNAME: ${{ secrets.SITE_USERNAME }}
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
           TOTP_SECRET: ${{ secrets.TOTP_SECRET }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: python checkin.py
 
       - name: 上传截图（签到失败时）

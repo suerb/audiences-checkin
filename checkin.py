@@ -211,6 +211,10 @@ async def main():
             # 执行签到
             result = await do_checkin(page)
             print(result)
+            notify_feishu(
+                title="✅ audiences.me 签到成功",
+                content=f"时间：{__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}\n{result}"
+            )
 
         except Exception as e:
             msg = str(e)
