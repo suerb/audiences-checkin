@@ -20,6 +20,9 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 还原 session 文件
+        run: echo "${{ secrets.SESSION_JSON }}" | base64 -d > session.json
+
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
