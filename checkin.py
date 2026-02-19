@@ -2,7 +2,7 @@
 audiences.me 自动签到脚本
 - 复用已保存的 session（cookies），session 由 setup_session.py 生成
 - 点击「签到得爆米花」按钮完成签到
-- 遇到 reCAPTCHA 则跳过当天，等待明天重试
+- 签到失败时给出明确原因并推送飞书通知
 """
 
 import asyncio
@@ -65,25 +65,26 @@ async def is_logged_in(page) -> bool:
     """检测当前页面是否已登录"""
     try:
         await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=15000)
-        # 如果跳转到登录页，说明未登录
         if "login" in page.url:
             return False
-        # 检查页面是否包含签到按钮或已登录特征
         checkin_btn = await page.query_selector("text=签到得爆米花")
         return checkin_btn is not None
-    except Exception:
-        return False
+    except PlaywrightTimeout:
+        raise RuntimeError("【网络超时】访问签到页面超时，可能是网站无法访问或正在维护，请稍后检查 https://audiences.me")
+    except Exception as e:
+        raise RuntimeError(f"【网络异常】访问签到页面时发生未知错误：{e}")
 
 
 async def login(page):
     """执行登录 + TOTP 二次验证"""
     print("正在登录...")
-    await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
+    try:
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
+    except PlaywrightTimeout:
+        raise RuntimeError("【网络超时】访问登录页面超时，可能是网站无法访问或正在维护")
 
-    # 填写账号密码（根据实际页面选择器调整）
     await page.wait_for_selector("input[name='username'], input[type='email'], #username", timeout=10000)
 
-    # 尝试常见的用户名/邮箱选择器
     for selector in ["input[name='username']", "input[name='email']", "#username", "input[type='email']"]:
         el = await page.query_selector(selector)
         if el:
@@ -96,7 +97,6 @@ async def login(page):
             await el.fill(PASSWORD)
             break
 
-    # 点击登录按钮
     for selector in ["button[type='submit']", "input[type='submit']", "#login-btn", "button:text('登录')", "button:text('Login')"]:
         el = await page.query_selector(selector)
         if el:
@@ -115,11 +115,12 @@ async def login(page):
 
     if totp_input:
         print("检测到二次验证，正在生成 TOTP 验证码...")
+        if not TOTP_SECRET:
+            raise RuntimeError("【配置缺失】Session 已失效需要重新登录，但 TOTP_SECRET 未配置，无法完成二次验证。请在 GitHub Secrets 中添加 TOTP_SECRET，或重新运行 setup_session.py 生成新的 session.json")
         code = get_totp_code()
         print(f"TOTP 验证码：{code}")
         await totp_input.fill(code)
 
-        # 提交验证码
         for selector in ["button[type='submit']", "input[type='submit']", "button:text('验证')", "button:text('Verify')"]:
             el = await page.query_selector(selector)
             if el:
@@ -128,9 +129,8 @@ async def login(page):
 
         await asyncio.sleep(2)
 
-    # 验证是否登录成功
     if "login" in page.url:
-        raise RuntimeError("登录失败，请检查账号密码或 TOTP 密钥")
+        raise RuntimeError("【登录失败】账号密码错误，或 TOTP 验证码已过期。请检查 SITE_USERNAME / SITE_PASSWORD / TOTP_SECRET 是否正确")
 
     print("登录成功！")
 
@@ -138,28 +138,40 @@ async def login(page):
 async def do_checkin(page) -> str:
     """执行签到，返回结果信息"""
     print("正在前往签到页面...")
-    await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=15000)
+    try:
+        await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=15000)
+    except PlaywrightTimeout:
+        raise RuntimeError("【网络超时】加载签到页面超时，可能是网站正在维护或 GitHub Actions IP 被临时限流")
+
     await asyncio.sleep(1)
+
+    # 检测 reCAPTCHA
+    captcha = await page.query_selector("iframe[src*='recaptcha'], .g-recaptcha, #recaptcha")
+    if captcha:
+        await page.screenshot(path="debug_captcha.png", full_page=True)
+        raise RuntimeError("【reCAPTCHA 拦截】签到页面触发了人机验证，stealth 模式本次未能绕过。截图已上传至 Artifacts，明天将自动重试")
 
     # 查找签到按钮
     btn = await page.query_selector("text=签到得爆米花")
     if not btn:
-        # 备选：查找包含该文字的按钮
         btn = await page.query_selector("a:has-text('签到得爆米花'), button:has-text('签到得爆米花')")
 
     if not btn:
-        # 截图保留现场
         await page.screenshot(path="debug_no_button.png", full_page=True)
         # 检查是否已经签到过
         already = await page.query_selector("text=今日已签到, text=已签到, text=签到成功")
         if already:
             return "今日已签到过，无需重复操作"
-        raise RuntimeError("未找到「签到得爆米花」按钮，已截图至 debug_no_button.png")
+        # 检查是否名额已满
+        full = await page.query_selector("text=名额已满, text=已满, text=今日名额")
+        if full:
+            raise RuntimeError("【名额已满】今日签到名额已被抢完，明天 00:00 刷新后将自动重试")
+        raise RuntimeError("【页面异常】未找到「签到得爆米花」按钮，可能是网站改版或页面结构变化。截图已上传至 Artifacts，请人工检查")
 
     await btn.click()
     await asyncio.sleep(2)
 
-    # 检测签到结果（弹窗、提示文字等）
+    # 检测签到结果
     for selector in [".alert", ".toast", ".message", ".success", "[class*='success']", "[class*='alert']"]:
         el = await page.query_selector(selector)
         if el:
@@ -172,18 +184,23 @@ async def do_checkin(page) -> str:
 
 async def main():
     if not USERNAME or not PASSWORD:
-        print("错误：请设置 SITE_USERNAME 和 SITE_PASSWORD 环境变量")
+        msg = "【配置缺失】GitHub Secrets 中未找到 SITE_USERNAME 或 SITE_PASSWORD，请检查仓库 Settings → Secrets 配置"
+        print(msg)
+        notify_feishu(title="❌ audiences.me 签到失败", content=f"时间：{__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}\n{msg}")
+        sys.exit(1)
+
+    if not os.path.exists(SESSION_FILE):
+        msg = "【配置缺失】未找到 session.json，请先运行 setup_session.py 完成首次登录，并将 base64 内容存为 GitHub Secret SESSION_JSON，同时在 workflow 中加入还原步骤"
+        print(msg)
+        notify_feishu(title="❌ audiences.me 签到失败", content=f"时间：{__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}\n{msg}")
         sys.exit(1)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
 
-        # 尝试加载已保存的 session
-        context_kwargs = {}
-        if os.path.exists(SESSION_FILE):
-            with open(SESSION_FILE) as f:
-                context_kwargs["storage_state"] = json.load(f)
-            print(f"已加载保存的 session：{SESSION_FILE}")
+        with open(SESSION_FILE) as f:
+            context_kwargs = {"storage_state": json.load(f)}
+        print(f"已加载保存的 session：{SESSION_FILE}")
 
         context = await browser.new_context(
             **context_kwargs,
@@ -191,16 +208,14 @@ async def main():
             viewport={"width": 1280, "height": 800},
         )
         page = await context.new_page()
-        await stealth_async(page)  # 隐藏自动化特征，降低 reCAPTCHA 风险评分
+        await stealth_async(page)
 
         try:
-            # 检测登录状态
             logged_in = await is_logged_in(page)
 
             if not logged_in:
-                print("Session 失效或不存在，重新登录...")
+                print("Session 失效，重新登录...")
                 await login(page)
-                # 保存新 session
                 storage = await context.storage_state()
                 with open(SESSION_FILE, "w") as f:
                     json.dump(storage, f)
@@ -208,7 +223,6 @@ async def main():
             else:
                 print("Session 有效，跳过登录")
 
-            # 执行签到
             result = await do_checkin(page)
             print(result)
             notify_feishu(
@@ -222,7 +236,7 @@ async def main():
             await page.screenshot(path="error.png", full_page=True)
             notify_feishu(
                 title="❌ audiences.me 签到失败",
-                content=f"时间：{__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}\n原因：{msg}\n请检查 GitHub Actions 日志或截图。"
+                content=f"时间：{__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}\n{msg}"
             )
             sys.exit(1)
 
