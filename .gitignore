@@ -1,0 +1,14 @@
+# 敏感文件，不提交到 Git
+session.json
+config.py
+.env
+
+# 调试截图
+*.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
