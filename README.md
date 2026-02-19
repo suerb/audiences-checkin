@@ -141,16 +141,37 @@ base64 -i session.json
 
 ---
 
-## 签到失败通知格式
+## 飞书通知
 
-配置飞书 Webhook 后，失败时会收到如下消息：
+签到成功和失败都会推送通知。
 
+**成功格式：**
+```
+✅ audiences.me 签到成功
+时间：2026-02-20 09:00
+签到结果：xxx
+```
+
+**失败格式：**
 ```
 ❌ audiences.me 签到失败
-时间：2026-02-20 00:05
-原因：未找到「签到得爆米花」按钮
-请检查 GitHub Actions 日志或截图。
+时间：2026-02-20 09:00
+【原因类型】具体原因及处理建议
 ```
+
+### 失败原因对照表
+
+| 原因类型 | 触发场景 | 处理方式 |
+|---|---|---|
+| 【配置缺失】SITE_USERNAME/PASSWORD | GitHub Secrets 未配置账号密码 | 在仓库 Settings → Secrets 中添加 |
+| 【配置缺失】session.json 不存在 | workflow 中未加入 SESSION_JSON 还原步骤 | 补充还原步骤，或重新运行 setup_session.py |
+| 【配置缺失】TOTP_SECRET 未配置 | session 失效需重新登录，但缺少 TOTP 密钥 | 在 Secrets 中添加 TOTP_SECRET |
+| 【登录失败】账号密码或 TOTP 错误 | 账号密码变更，或 TOTP_SECRET 密钥不正确 | 检查并更新对应 Secret |
+| 【网络超时】访问页面超时 | 网站维护或 GitHub Actions IP 被限流 | 次日自动重试，或手动触发 |
+| 【网络异常】未知网络错误 | 其他网络层面的异常 | 查看 Actions 日志排查 |
+| 【reCAPTCHA 拦截】人机验证未绕过 | stealth 本次未能降低评分 | 次日自动重试；截图已上传 Artifacts |
+| 【名额已满】今日名额已抢完 | 签到名额被抢光 | 次日 00:00 刷新后自动重试 |
+| 【页面异常】找不到签到按钮 | 网站改版或页面结构变化 | 查看 Artifacts 截图，联系维护者更新选择器 |
 
 失败截图会上传至 GitHub Actions → 对应 workflow run → Artifacts，保留 3 天。
 
