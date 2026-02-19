@@ -11,7 +11,7 @@ on:
 jobs:
   checkin:
     name: 执行签到
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     # 仅每日签到的 cron 触发，或手动触发时执行
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 1 * * *'
