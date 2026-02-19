@@ -82,7 +82,7 @@ async def is_logged_in(page) -> bool:
         if checkin_btn:
             return True
 
-        already = await page.query_selector("text=今日已签到")
+        already = await page.query_selector("text=今日已签到, text=签到已得")
         if already:
             return True
 
@@ -184,7 +184,7 @@ async def do_checkin(page) -> str:
     if not btn:
         await page.screenshot(path="debug_no_button.png", full_page=True)
         # 检查是否已经签到过
-        already = await page.query_selector("text=今日已签到, text=已签到, text=签到成功")
+        already = await page.query_selector("text=今日已签到, text=已签到, text=签到成功, text=签到已得")
         if already:
             return "今日已签到过，无需重复操作"
         # 检查是否名额已满
