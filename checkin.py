@@ -64,15 +64,40 @@ def get_totp_code() -> str:
 async def is_logged_in(page) -> bool:
     """检测当前页面是否已登录"""
     try:
-        await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=15000)
-        if "login" in page.url:
+        print(f"正在检测登录状态，访问：{CHECKIN_URL}")
+        await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(5)  # 等待 Cloudflare 验证跳转
+
+        current_url = page.url
+        title = await page.title()
+        print(f"当前页面标题：{title}")
+        print(f"当前页面URL：{current_url}")
+
+        if "login" in current_url:
+            print("检测到 URL 包含 login，判定为未登录")
             return False
+
+        # 尝试查找签到相关元素
         checkin_btn = await page.query_selector("text=签到得爆米花")
-        return checkin_btn is not None
+        if checkin_btn:
+            return True
+
+        already = await page.query_selector("text=今日已签到")
+        if already:
+            return True
+
+        # 如果既不是登录页，也找不到签到按钮，截图看看
+        if "login" not in current_url:
+            print("未找到签到按钮，截图 debug_login_check.png")
+            await page.screenshot(path="debug_login_check.png", full_page=True)
+
+        return False
     except PlaywrightTimeout:
-        raise RuntimeError("【网络超时】访问签到页面超时，可能是网站无法访问或正在维护，请稍后检查 https://audiences.me")
+        print("检测登录状态超时")
+        return False
     except Exception as e:
-        raise RuntimeError(f"【网络异常】访问签到页面时发生未知错误：{e}")
+        print(f"检测登录状态出错：{e}")
+        return False
 
 
 async def login(page):
