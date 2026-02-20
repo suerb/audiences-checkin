@@ -194,17 +194,29 @@ async def do_checkin(page) -> str:
         raise RuntimeError("【页面异常】未找到「签到得爆米花」按钮，可能是网站改版或页面结构变化。截图已上传至 Artifacts，请人工检查")
 
     await btn.click()
-    await asyncio.sleep(2)
+    print("已点击签到按钮，等待 5 秒响应...")
+    await asyncio.sleep(5)
+
+    # 截图记录点击后的状态
+    await page.screenshot(path="debug_after_click.png", full_page=True)
+
+    # 再次检测 reCAPTCHA (点击后触发)
+    captcha = await page.query_selector("iframe[src*='recaptcha'], .g-recaptcha, #recaptcha")
+    if captcha:
+        raise RuntimeError("【签到中断】点击按钮后触发了 reCAPTCHA 人机验证，导致签到未完成。截图已上传。")
 
     # 检测签到结果
-    for selector in [".alert", ".toast", ".message", ".success", "[class*='success']", "[class*='alert']"]:
+    for selector in [".alert", ".toast", ".message", ".success", "[class*='success']", "[class*='alert']", "td.text", "#outer"]:
         el = await page.query_selector(selector)
         if el:
             text = await el.inner_text()
-            if text.strip():
-                return f"签到结果：{text.strip()}"
+            # 过滤一些无关的干扰文本
+            if "签到" in text or "获得" in text or "成功" in text:
+                 return f"签到结果：{text.strip()[:100]}"
 
-    return "签到操作已完成（未检测到明确提示）"
+    # 如果运行到这里，说明既没报错也没找到成功提示
+    # 强制抛出异常，以便上传截图供人工排查
+    raise RuntimeError("【未知结果】点击签到后未检测到明确的成功/失败提示。请查看 Artifacts 中的 debug_after_click.png 确认页面状态。")
 
 
 async def main():
