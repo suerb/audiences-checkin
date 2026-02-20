@@ -27,21 +27,62 @@ TOTP_SECRET = os.environ.get("TOTP_SECRET", "")
 FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK", "")
 
 
-def notify_feishu(title: str, content: str):
-    """发送飞书通知，失败时静默忽略不影响主流程"""
+def notify_feishu(title: str, content: str, status: str = "success"):
+    """发送飞书富文本卡片通知
+    status: success / error
+    """
     if not FEISHU_WEBHOOK:
         return
+
+    # 拼接 GitHub Actions 运行链接
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    run_url = f"{server_url}/{repo}/actions/runs/{run_id}" if run_id else "https://github.com/suerb/audiences-checkin/actions"
+
+    # 根据状态设置颜色和图标
+    header_color = "green" if status == "success" else "red"
+    icon = "✅" if status == "success" else "❌"
+
     payload = json.dumps({
-        "msg_type": "post",
-        "content": {
-            "post": {
-                "zh_cn": {
-                    "title": title,
-                    "content": [[{"tag": "text", "text": content}]]
+        "msg_type": "interactive",
+        "card": {
+            "config": {
+                "wide_screen_mode": True
+            },
+            "header": {
+                "template": header_color,
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"{icon} {title}"
                 }
-            }
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": content
+                    }
+                },
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "查看运行详情 & 截图"
+                            },
+                            "type": "primary",
+                            "url": run_url
+                        }
+                    ]
+                }
+            ]
         }
     }).encode("utf-8")
+
     try:
         req = urllib.request.Request(
             FEISHU_WEBHOOK,
@@ -49,8 +90,8 @@ def notify_feishu(title: str, content: str):
             headers={"Content-Type": "application/json"},
         )
         urllib.request.urlopen(req, timeout=10)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"飞书通知发送失败: {e}")
 
 
 def get_totp_code() -> str:
@@ -205,14 +246,19 @@ async def do_checkin(page) -> str:
     if captcha:
         raise RuntimeError("【签到中断】点击按钮后触发了 reCAPTCHA 人机验证，导致签到未完成。截图已上传。")
 
-    # 检测签到结果
-    for selector in [".alert", ".toast", ".message", ".success", "[class*='success']", "[class*='alert']", "td.text", "#outer"]:
+    # 检测签到结果 - 仅匹配精准的提示框
+    for selector in [".alert", ".toast", ".message", ".success", "[class*='success']", "[class*='alert']"]:
         el = await page.query_selector(selector)
         if el:
             text = await el.inner_text()
-            # 过滤一些无关的干扰文本
-            if "签到" in text or "获得" in text or "成功" in text:
-                 return f"签到结果：{text.strip()[:100]}"
+            text = text.strip()
+            if text:
+                 return f"签到结果：{text}"
+
+    # 如果没有弹窗，检查是否有具体的文字变化
+    success_text = await page.query_selector("text=今日已签到, text=签到已得, text=获得")
+    if success_text:
+        return f"签到结果：{await success_text.inner_text()}"
 
     # 如果运行到这里，说明既没报错也没找到成功提示
     # 强制抛出异常，以便上传截图供人工排查
