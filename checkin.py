@@ -88,8 +88,8 @@ async def is_logged_in(page) -> bool:
 
         # 如果既不是登录页，也找不到签到按钮，截图看看
         if "login" not in current_url:
-            print("未找到签到按钮，截图 debug_login_check.png")
-            await page.screenshot(path="debug_login_check.png", full_page=True)
+            print("未找到签到按钮，但当前不在登录页，判定为已登录（可能是已签到或页面结构变化）")
+            return True
 
         return False
     except PlaywrightTimeout:
