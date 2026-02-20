@@ -256,11 +256,21 @@ async def do_checkin(page) -> str:
                  return f"签到结果：{text}"
 
     # 如果没有弹窗，检查是否有具体的文字变化
-    success_text = await page.query_selector("text=今日已签到, text=签到已得, text=获得")
+    success_text = await page.query_selector("text=今日已签到, text=签到已得, text=获得, text=您今天已经签到过了")
     if success_text:
         return f"签到结果：{await success_text.inner_text()}"
 
-    # 如果运行到这里，说明既没报错也没找到成功提示
+    # 再次检查按钮状态：如果原来的按钮找不到了，或者文字变了，说明点击生效了
+    btn_after = await page.query_selector("text=签到得爆米花")
+    if not btn_after:
+        return "签到操作已执行（按钮已消失，判定为成功）"
+
+    # 或者按钮还在，但文字变了
+    btn_text = await btn_after.inner_text()
+    if "签到" not in btn_text or "已" in btn_text:
+         return f"签到操作已执行（按钮文字变为：{btn_text}）"
+
+    # 如果运行到这里，说明按钮还在，也没变，也没提示
     # 强制抛出异常，以便上传截图供人工排查
     raise RuntimeError("【未知结果】点击签到后未检测到明确的成功/失败提示。请查看 Artifacts 中的 debug_after_click.png 确认页面状态。")
 
