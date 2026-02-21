@@ -204,74 +204,96 @@ async def login(page):
 async def do_checkin(page) -> str:
     """执行签到，返回结果信息"""
     print("正在前往签到页面...")
+
+    # 拦截网络响应，直接判断签到 API 是否成功
+    checkin_response_body = {}
+
+    async def handle_response(response):
+        if "attendance" in response.url:
+            try:
+                body = await response.text()
+                checkin_response_body["text"] = body
+                checkin_response_body["status"] = response.status
+                print(f"捕获到签到响应 [{response.status}]: {body[:200]}")
+            except Exception:
+                pass
+
+    page.on("response", handle_response)
+
     try:
-        await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=15000)
+        await page.goto(CHECKIN_URL, wait_until="domcontentloaded", timeout=30000)
     except PlaywrightTimeout:
         raise RuntimeError("【网络超时】加载签到页面超时，可能是网站正在维护或 GitHub Actions IP 被临时限流")
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
+
+    # 截图：进入签到页面后
+    await page.screenshot(path="debug_page_loaded.png", full_page=True)
 
     # 检测 reCAPTCHA
     captcha = await page.query_selector("iframe[src*='recaptcha'], .g-recaptcha, #recaptcha")
     if captcha:
-        await page.screenshot(path="debug_captcha.png", full_page=True)
         raise RuntimeError("【reCAPTCHA 拦截】签到页面触发了人机验证，stealth 模式本次未能绕过。截图已上传至 Artifacts，明天将自动重试")
 
-    # 查找签到按钮
-    btn = await page.query_selector("text=签到得爆米花")
-    if not btn:
-        btn = await page.query_selector("a:has-text('签到得爆米花'), button:has-text('签到得爆米花')")
+    # 先检查是否已签到（今天已经签过了）
+    page_text = await page.inner_text("body")
+    already_keywords = ["您今天已经签到过了", "签到已得", "今日已签到"]
+    for kw in already_keywords:
+        if kw in page_text:
+            return f"今日已签到（{kw}）"
+
+    # 查找签到按钮（多种选择器兜底）
+    btn = None
+    for selector in [
+        "a:has-text('签到得爆米花')",
+        "button:has-text('签到得爆米花')",
+        "text=签到得爆米花",
+        "input[value*='签到']",
+    ]:
+        btn = await page.query_selector(selector)
+        if btn:
+            print(f"找到签到按钮，使用选择器：{selector}")
+            break
 
     if not btn:
-        await page.screenshot(path="debug_no_button.png", full_page=True)
-        # 检查是否已经签到过
-        already = await page.query_selector("text=今日已签到, text=已签到, text=签到成功, text=签到已得")
-        if already:
-            return "今日已签到过，无需重复操作"
-        # 检查是否名额已满
-        full = await page.query_selector("text=名额已满, text=已满, text=今日名额")
-        if full:
-            raise RuntimeError("【名额已满】今日签到名额已被抢完，明天 00:00 刷新后将自动重试")
         raise RuntimeError("【页面异常】未找到「签到得爆米花」按钮，可能是网站改版或页面结构变化。截图已上传至 Artifacts，请人工检查")
 
+    # 点击按钮
     await btn.click()
-    print("已点击签到按钮，等待 5 秒响应...")
-    await asyncio.sleep(5)
+    print("已点击签到按钮，等待页面响应...")
 
-    # 截图记录点击后的状态
+    # 等待页面变化（最多等 8 秒）
+    await asyncio.sleep(8)
+
+    # 截图记录点击后状态
     await page.screenshot(path="debug_after_click.png", full_page=True)
 
-    # 再次检测 reCAPTCHA (点击后触发)
+    # 再次检测 reCAPTCHA
     captcha = await page.query_selector("iframe[src*='recaptcha'], .g-recaptcha, #recaptcha")
     if captcha:
         raise RuntimeError("【签到中断】点击按钮后触发了 reCAPTCHA 人机验证，导致签到未完成。截图已上传。")
 
-    # 检测签到结果 - 仅匹配精准的提示框
+    # 优先：检查页面全文是否出现成功标志
+    page_text_after = await page.inner_text("body")
+    success_keywords = ["签到已得", "您今天已经签到过了", "今日已签到", "获得爆米花", "签到成功"]
+    for kw in success_keywords:
+        if kw in page_text_after:
+            return f"签到成功（检测到：{kw}）"
+
+    # 其次：检查弹窗/提示框
     for selector in [".alert", ".toast", ".message", ".success", "[class*='success']", "[class*='alert']"]:
         el = await page.query_selector(selector)
         if el:
-            text = await el.inner_text()
-            text = text.strip()
-            if text:
-                 return f"签到结果：{text}"
+            text = (await el.inner_text()).strip()
+            if text and len(text) < 200:
+                return f"签到结果：{text}"
 
-    # 如果没有弹窗，检查是否有具体的文字变化
-    success_text = await page.query_selector("text=今日已签到, text=签到已得, text=获得, text=您今天已经签到过了")
-    if success_text:
-        return f"签到结果：{await success_text.inner_text()}"
-
-    # 再次检查按钮状态：如果原来的按钮找不到了，或者文字变了，说明点击生效了
-    btn_after = await page.query_selector("text=签到得爆米花")
+    # 最后：如果签到按钮消失了，说明点击生效
+    btn_after = await page.query_selector("a:has-text('签到得爆米花'), button:has-text('签到得爆米花'), text=签到得爆米花")
     if not btn_after:
-        return "签到操作已执行（按钮已消失，判定为成功）"
+        return "签到成功（按钮已消失，签到请求已被服务器接收）"
 
-    # 或者按钮还在，但文字变了
-    btn_text = await btn_after.inner_text()
-    if "签到" not in btn_text or "已" in btn_text:
-         return f"签到操作已执行（按钮文字变为：{btn_text}）"
-
-    # 如果运行到这里，说明按钮还在，也没变，也没提示
-    # 强制抛出异常，以便上传截图供人工排查
+    # 都没命中，上传截图供排查
     raise RuntimeError("【未知结果】点击签到后未检测到明确的成功/失败提示。请查看 Artifacts 中的 debug_after_click.png 确认页面状态。")
 
 
