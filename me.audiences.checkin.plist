@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>me.audiences.checkin</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>PLACEHOLDER_SCRIPT_PATH</string>
+    </array>
+
+    <!-- 每天北京时间 09:00 执行（UTC+8，即 UTC 01:00） -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>1</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>PLACEHOLDER_LOG_PATH</string>
+
+    <key>StandardErrorPath</key>
+    <string>PLACEHOLDER_LOG_PATH</string>
+
+    <!-- Mac 休眠期间错过的任务，唤醒后立即补跑 -->
+    <key>RunAtLoad</key>
+    <false/>
+
+</dict>
+</plist>

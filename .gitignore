@@ -3,6 +3,9 @@ session.json
 config.py
 .env
 
+# 运行日志
+checkin.log
+
 # 调试截图
 *.png
 

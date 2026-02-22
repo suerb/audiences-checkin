@@ -1,184 +1,103 @@
-# audiences.me 自动签到
+# audiences.me 自动签到（Mac 本地方案）
 
-每天凌晨自动在 [audiences.me](https://audiences.me) 完成签到，基于 GitHub Actions 云端运行，无需本地开机。
-
----
-
-## 需求背景
-
-- 目标网站：`https://audiences.me/attendance.php`
-- 签到按钮：「签到得爆米花」，每天 00:00 刷新名额
-- 登录方式：账号密码 + Google Authenticator 二次验证（仅首次登录需要）
-- 签到页存在 reCAPTCHA v2（不一定每次触发）
-- 要求连续签到不中断
-- 签到失败时通过飞书机器人发送通知
+每天北京时间 09:00 自动签到，结果推送飞书通知，零维护。
 
 ---
 
-## 系统架构
+## 方案原理
 
 ```
-audiences-checkin/
-├── checkin.py                # 核心：每日签到逻辑
-├── setup_session.py          # 一次性工具：首次登录，保存登录态
-├── requirements.txt          # Python 依赖
-├── .gitignore                # 排除 session.json、截图等敏感/临时文件
-└── .github/workflows/
-    └── checkin.yml           # GitHub Actions 定时调度
+每天 09:00
+  macOS launchd 触发 run_checkin.sh
+    → checkin_local.py
+        → browser_cookie3 读取 Chrome 最新 cookies（含 cf_clearance）
+        → 复制 Chrome 真实 Profile（含 Turnstile 指纹数据）
+        → Playwright 用真实 Chrome 启动
+        → 注入解密后的 session cookies
+        → 访问签到页面，Cloudflare Turnstile 自动通过
+        → 点击签到按钮
+        → 结果推送飞书
 ```
 
-### 运行流程
+**为什么这样做：**
 
-```
-首次使用（本地）
-──────────────────────────────────────────
-python setup_session.py
-  └─ 弹出浏览器（有界面）
-  └─ 填账号密码 → 手动输入 TOTP 验证码 → 登录成功
-  └─ 保存 session.json
-  └─ 将 session.json base64 编码 → 存为 GitHub Secret SESSION_JSON
-
-
-每日自动（GitHub Actions 云端）
-──────────────────────────────────────────
-UTC 16:05 = 北京时间 00:05 触发
-  └─ 还原 session.json（从 Secret 解码）
-  └─ checkin.py 启动
-       ├─ playwright-stealth 隐藏自动化特征（降低 reCAPTCHA 风险评分）
-       ├─ 加载 session.json，检测登录态
-       │    └─ session 失效时 → 用 TOTP_SECRET 自动重新登录
-       ├─ 点击「签到得爆米花」
-       ├─ 成功 → 打印结果，结束
-       └─ 失败 → 截图上传 Artifacts + 飞书通知
-
-
-每月保活（GitHub Actions 云端）
-──────────────────────────────────────────
-每月 1 日 / 20 日触发
-  └─ git commit --allow-empty（防止 GitHub 60 天无活动暂停 Actions）
-```
-
-### 关键技术决策
-
-| 问题 | 方案 |
+| 问题 | 解法 |
 |---|---|
-| TOTP 二次验证 | `setup_session.py` 手动输入一次，之后复用 session，正常不再触发 |
-| session 云端存储 | base64 编码存为 GitHub Secret，不提交进 Git |
-| reCAPTCHA v2 | `playwright-stealth` 降低风险评分，大概率自动通过无需人工干预 |
-| 签到失败感知 | 飞书 Webhook 通知 + GitHub Artifacts 截图存档 |
-| 仓库活跃保活 | 每月 1、20 日空提交，避免 GitHub 60 天后暂停定时任务 |
+| Cloudflare Turnstile 拦截自动化浏览器 | 复制真实 Chrome Profile（含 IndexedDB 指纹），Turnstile 无法区分真实用户 |
+| cf_clearance 随时过期 | browser_cookie3 实时读取 Chrome Cookie 数据库，每次运行都是最新 cookie |
+| GitHub Actions IP 可疑 | 本机运行，IP 与日常浏览完全一致 |
 
 ---
 
-## 使用说明
+## 文件说明
 
-### 前置条件
-
-- Python 3.10+
-- GitHub 账号
-- 飞书群机器人 Webhook（可选，用于失败通知）
-
----
-
-### 第一步：配置 GitHub Secrets
-
-仓库 → Settings → Secrets and variables → Actions → New repository secret，添加以下 Secrets：
-
-| Secret 名称 | 内容 | 必填 |
-|---|---|---|
-| `SITE_USERNAME` | 网站账号 | ✅ |
-| `SITE_PASSWORD` | 网站密码 | ✅ |
-| `FEISHU_WEBHOOK` | 飞书机器人 Webhook URL | 可选 |
-| `SESSION_JSON` | session.json 的 base64 内容 | ✅（第三步完成后添加）|
-
-> 飞书机器人创建方式：飞书任意群 → 设置 → 机器人 → 添加机器人 → 自定义机器人 → 复制 Webhook URL
+| 文件 | 用途 |
+|---|---|
+| `checkin_local.py` | 核心签到逻辑 |
+| `run_checkin.sh` | launchd 调用的启动脚本（加载 .env、写日志） |
+| `install_launchd.sh` | 一键安装定时任务 |
+| `me.audiences.checkin.plist` | launchd plist 模板 |
+| `requirements_local.txt` | Python 依赖 |
+| `.env` | 配置文件（不提交 Git，含飞书 Webhook） |
+| `checkin.log` | 运行日志（不提交 Git） |
 
 ---
 
-### 第二步：本地安装依赖
+## 安装
+
+### 前提
+
+- macOS，Mac 不关机
+- Chrome 已登录 audiences.me
+- Python 3.9+
+
+### 步骤
+
+**1. 配置飞书 Webhook（可选，用于推送签到结果）**
 
 ```bash
-cd audiences-checkin
-pip install -r requirements.txt
-playwright install chromium
+echo 'FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx' > .env
 ```
 
----
-
-### 第三步：首次登录，生成 session
+**2. 一键安装**
 
 ```bash
-python setup_session.py
+bash install_launchd.sh
 ```
 
-脚本会弹出浏览器，按提示输入账号、密码，并手动输入 Google Authenticator 当前验证码，完成登录后自动保存 `session.json`。
+自动完成：创建 venv → 安装依赖 → 注册 launchd 定时任务（每天北京时间 09:00）。
 
-然后将其 base64 编码并存为 GitHub Secret：
+**3. 立即测试**
 
 ```bash
-base64 -i session.json
-# 复制输出内容，存为 Secret：SESSION_JSON
+bash run_checkin.sh
 ```
+
+日志出现 `签到完成` 或 `今日已签到` 即为正常。
 
 ---
 
-### 第四步：补充 SESSION_JSON 还原步骤
+## 日常操作
 
-在 `.github/workflows/checkin.yml` 的 checkin job 中，`检出代码` 步骤之后加入：
-
-```yaml
-- name: 还原 session 文件
-  run: echo "${{ secrets.SESSION_JSON }}" | base64 -d > session.json
-```
-
----
-
-### 第五步：手动触发，验证云端是否跑通
-
-仓库 → Actions → 「每日自动签到」→ Run workflow
-
-查看运行日志，确认签到成功。
+| 操作 | 命令 |
+|---|---|
+| 查看日志 | `tail -50 checkin.log` |
+| 手动触发签到 | `bash run_checkin.sh` |
+| 查看定时任务状态 | `launchctl list \| grep audiences` |
+| 卸载定时任务 | `launchctl unload ~/Library/LaunchAgents/me.audiences.checkin.plist` |
 
 ---
 
-## 飞书通知
+## 故障处理
 
-签到成功和失败都会推送通知。
+**飞书收到失败通知**
+在 Chrome 里打开 audiences.me 随便逛一下，等第二天自动重试。大概率是 cf_clearance 过期，Chrome 正常访问后会自动刷新。
 
-**成功格式：**
-```
-✅ audiences.me 签到成功
-时间：2026-02-20 09:00
-签到结果：xxx
-```
-
-**失败格式：**
-```
-❌ audiences.me 签到失败
-时间：2026-02-20 09:00
-【原因类型】具体原因及处理建议
-```
-
-### 失败原因对照表
-
-| 原因类型 | 触发场景 | 处理方式 |
-|---|---|---|
-| 【配置缺失】SITE_USERNAME/PASSWORD | GitHub Secrets 未配置账号密码 | 在仓库 Settings → Secrets 中添加 |
-| 【配置缺失】session.json 不存在 | workflow 中未加入 SESSION_JSON 还原步骤 | 补充还原步骤，或重新运行 setup_session.py |
-| 【配置缺失】TOTP_SECRET 未配置 | session 失效需重新登录，但缺少 TOTP 密钥 | 在 Secrets 中添加 TOTP_SECRET |
-| 【登录失败】账号密码或 TOTP 错误 | 账号密码变更，或 TOTP_SECRET 密钥不正确 | 检查并更新对应 Secret |
-| 【网络超时】访问页面超时 | 网站维护或 GitHub Actions IP 被限流 | 次日自动重试，或手动触发 |
-| 【网络异常】未知网络错误 | 其他网络层面的异常 | 查看 Actions 日志排查 |
-| 【reCAPTCHA 拦截】人机验证未绕过 | stealth 本次未能降低评分 | 次日自动重试；截图已上传 Artifacts |
-| 【名额已满】今日名额已抢完 | 签到名额被抢光 | 次日 00:00 刷新后自动重试 |
-| 【页面异常】找不到签到按钮 | 网站改版或页面结构变化 | 查看 Artifacts 截图，联系维护者更新选择器 |
-
-失败截图会上传至 GitHub Actions → 对应 workflow run → Artifacts，保留 3 天。
+**"Session 失效"错误**
+在 Chrome 里重新登录 audiences.me。
 
 ---
 
-## 待确认事项
+## 维护成本
 
-- [ ] 签到请求后端是否校验 `g-recaptcha-response`（明天签到时用 DevTools → Network 抓包确认）
-  - 不校验 → 问题彻底解决，stealth 方案足够
-  - 校验 → 考虑接入音频识别方案（Whisper 本地免费识别）
+几乎为零。只要 Mac 不关机、Chrome 偶尔正常访问 audiences.me（每周一次即可），系统永远自动运行。
