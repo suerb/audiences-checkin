@@ -1,13 +1,13 @@
 # audiences.me 自动签到（Mac 本地方案）
 
-每天北京时间 09:00 自动签到，结果推送飞书通知，零维护。
+每天北京时间 03:00 自动签到，结果推送飞书通知，零维护。
 
 ---
 
 ## 方案原理
 
 ```
-每天 09:00
+每天 03:00
   macOS launchd 触发 run_checkin.sh
     → checkin_local.py
         → browser_cookie3 读取 Chrome 最新 cookies（含 cf_clearance）
@@ -38,6 +38,7 @@
 | `install_launchd.sh` | 一键安装定时任务 |
 | `me.audiences.checkin.plist` | launchd plist 模板 |
 | `requirements_local.txt` | Python 依赖 |
+| `.env.example` | 配置文件模板（提交 Git，供参考） |
 | `.env` | 配置文件（不提交 Git，含飞书 Webhook） |
 | `checkin.log` | 运行日志（不提交 Git） |
 
@@ -56,7 +57,16 @@
 **1. 配置飞书 Webhook（可选，用于推送签到结果）**
 
 ```bash
-echo 'FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx' > .env
+# 复制配置模板
+cp .env.example .env
+
+# 编辑配置文件，填入你的飞书 Webhook
+nano .env
+```
+
+在 `.env` 文件中填入：
+```
+FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook地址
 ```
 
 **2. 一键安装**
@@ -65,7 +75,7 @@ echo 'FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx' > .env
 bash install_launchd.sh
 ```
 
-自动完成：创建 venv → 安装依赖 → 注册 launchd 定时任务（每天北京时间 09:00）。
+自动完成：创建 venv → 安装依赖 → 注册 launchd 定时任务（每天北京时间 03:00）。
 
 **3. 立即测试**
 
