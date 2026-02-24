@@ -40,4 +40,10 @@ EXIT_CODE=$?
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 签到脚本退出码：$EXIT_CODE" >> "$LOG_FILE"
 echo "---" >> "$LOG_FILE"
 
+# 签到完成后，等待 5 分钟，然后让 Mac 休眠
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 等待 5 分钟后进入休眠..." >> "$LOG_FILE"
+sleep 300
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 执行休眠命令" >> "$LOG_FILE"
+osascript -e 'tell application "System Events" to sleep'
+
 exit $EXIT_CODE

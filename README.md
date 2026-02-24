@@ -95,6 +95,8 @@ bash run_checkin.sh
 | 手动触发签到 | `bash run_checkin.sh` |
 | 查看定时任务状态 | `launchctl list \| grep audiences` |
 | 卸载定时任务 | `launchctl unload ~/Library/LaunchAgents/me.audiences.checkin.plist` |
+| 设置/修改自动唤醒 | `sudo pmset repeat wake MTWRFSU 02:58:00` |
+| 查看自动唤醒状态 | `pmset -g sched` |
 
 ---
 
@@ -110,4 +112,7 @@ bash run_checkin.sh
 
 ## 维护成本
 
-几乎为零。只要 Mac 不关机、Chrome 偶尔正常访问 audiences.me（每周一次即可），系统永远自动运行。
+几乎为零。系统包含以下自动恢复与休眠机制：
+- **定时唤醒**：如果你配置了 `pmset repeat`，Mac 会在 02:58 自动唤醒。
+- **自动休眠**：签到任务（`run_checkin.sh`）独立包含 5 分钟后自动休眠逻辑。
+只要 Mac 保持通电、Chrome 偶尔正常访问 audiences.me（每周一次即可），系统永远自动运行。
