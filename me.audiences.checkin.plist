@@ -16,11 +16,11 @@
         <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
     </dict>
 
-    <!-- 每天北京时间 09:00 执行（UTC+8，即 UTC 01:00） -->
+    <!-- 每天北京时间 03:00 执行（UTC+8，即 UTC 19:00） -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>1</integer>
+        <integer>19</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
